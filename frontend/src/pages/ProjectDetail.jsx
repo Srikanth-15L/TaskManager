@@ -37,34 +37,41 @@ const ProjectDetail = () => {
   const [editingTask, setEditingTask] = useState(null);
   const [selectedUser, setSelectedUser] = useState("");
 
-  const fetchAll = useCallback(async () => {
+  const fetchAll = useCallback(async (active) => {
     if (!projectId) return;
     setLoading(true);
     try {
-      // Use allSettled for the optional allUsers fetch
-      const promises = [
+      const results = await Promise.allSettled([
         getProjectById(projectId),
         getProjectMembers(projectId),
         getTasks(projectId),
-      ];
+      ]);
       
-      const results = await Promise.all(promises);
-      setProject(results[0].data.data);
-      setMembers(results[1].data.data);
-      setTasks(results[2].data.data);
+      if (!active.current) return;
 
-      if (isAdmin) {
-        const uRes = await getAllUsers();
-        setAllUsers(uRes.data.data || []);
+      if (results[0].status === "fulfilled") setProject(results[0].value.data.data);
+      if (results[1].status === "fulfilled") setMembers(results[1].value.data.data);
+      if (results[2].status === "fulfilled") setTasks(results[2].value.data.data);
+
+      if (isAdmin && active.current) {
+        try {
+          const uRes = await getAllUsers();
+          setAllUsers(uRes.data.data || []);
+        } catch (e) {
+          console.warn("Could not fetch all users for project assignment.");
+        }
       }
     } catch (err) {
       console.error("Project fetch error:", err);
-      toast.error("Failed to load project details.");
-    } finally { setLoading(false); }
+    } finally {
+      if (active.current) setLoading(false);
+    }
   }, [projectId, isAdmin]);
 
   useEffect(() => {
-    fetchAll();
+    const active = { current: true };
+    fetchAll(active);
+    return () => { active.current = false; };
   }, [fetchAll]);
 
   const validateTask = () => {

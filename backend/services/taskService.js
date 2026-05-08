@@ -55,13 +55,45 @@ const createTask = async ({ projectId, title, description, assignedTo, assignedB
  * Get tasks — admin sees all (or filtered by project), member sees only assigned tasks.
  */
 const getTasks = async (userId, role, projectId = null) => {
-  let query = db.collection("tasks");
+  let tasks = [];
+  
+  if (role === "admin") {
+    let query = db.collection("tasks");
+    if (projectId) query = query.where("projectId", "==", projectId);
+    const snap = await query.orderBy("createdAt", "desc").get();
+    tasks = snap.docs.map((d) => d.data());
+  } else {
+    // For members: see all tasks in projects they are part of
+    let projectIds = [];
+    if (projectId) {
+      const memCheck = await db.collection("projectMembers")
+        .where("projectId", "==", projectId)
+        .where("userId", "==", userId)
+        .get();
+      if (memCheck.empty) return []; // Or throw 403
+      projectIds = [projectId];
+    } else {
+      const memSnap = await db.collection("projectMembers")
+        .where("userId", "==", userId)
+        .get();
+      projectIds = memSnap.docs.map(d => d.data().projectId);
+    }
 
-  if (projectId) query = query.where("projectId", "==", projectId);
-  if (role !== "admin") query = query.where("assignedTo", "==", userId);
+    if (projectIds.length === 0) return [];
 
-  const snap = await query.orderBy("createdAt", "desc").get();
-  const tasks = snap.docs.map((d) => d.data());
+    // Firestore 'in' query supports max 30 items
+    const chunks = [];
+    for (let i = 0; i < projectIds.length; i += 30) {
+      chunks.push(projectIds.slice(i, i + 30));
+    }
+
+    for (const chunk of chunks) {
+      const snap = await db.collection("tasks").where("projectId", "in", chunk).get();
+      snap.docs.forEach((d) => tasks.push(d.data()));
+    }
+    // Sort manually since 'in' query and 'orderBy' on different fields is complex in Firestore
+    tasks.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  }
 
   // Fetch unique assignee names to avoid multiple DB hits
   const uids = [...new Set(tasks.map(t => t.assignedTo))];

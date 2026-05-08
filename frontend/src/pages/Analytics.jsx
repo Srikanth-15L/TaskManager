@@ -10,10 +10,12 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
+import { useAuth } from "../context/AuthContext";
 
 const COLORS = ["#10b981", "#0ea5e9", "#f59e0b", "#ef4444", "#64748b"];
 
 const Analytics = () => {
+  const { isAdmin } = useAuth();
   const [data, setData] = useState({
     statusData: [],
     priorityData: [],
@@ -26,14 +28,25 @@ const Analytics = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [pRes, tRes, uRes] = await Promise.all([
+        setLoading(true);
+        // Only fetch users if the current user is an admin
+        const promises = [
           getProjects(),
           getTasks(),
-          getAllUsers()
-        ]);
+        ];
+        if (isAdmin) {
+          promises.push(getAllUsers());
+        }
+        
+        const results = await Promise.allSettled(promises);
 
-        const projects = pRes.data.data;
-        const tasks = tRes.data.data || [];
+        const projects = results[0].status === "fulfilled" ? results[0].value.data.data : [];
+        const tasks = results[1].status === "fulfilled" ? results[1].value.data.data : [];
+        const users = isAdmin && results[2] && results[2].status === "fulfilled" ? results[2].value.data.data : [];
+
+        if (results[0].status === "rejected" || results[1].status === "rejected") {
+          console.warn("Some analytics data failed to load:", results[0].reason || results[1].reason);
+        }
 
         // Task Status Aggregation
         const statusCounts = {};
@@ -42,7 +55,9 @@ const Analytics = () => {
 
         // Priority Distribution
         const priorityCounts = { Low: 0, Medium: 0, High: 0, Critical: 0 };
-        tasks.forEach(t => priorityCounts[t.priority]++);
+        tasks.forEach(t => {
+          if (priorityCounts[t.priority] !== undefined) priorityCounts[t.priority]++;
+        });
         const priorityData = Object.keys(priorityCounts).map(name => ({ name, value: priorityCounts[name] }));
 
         // Project Completion Progress
@@ -73,6 +88,7 @@ const Analytics = () => {
           }
         });
       } catch (err) {
+        console.error("Analytics fetch error:", err);
         toast.error("Failed to load analytics data.");
       } finally {
         setLoading(false);

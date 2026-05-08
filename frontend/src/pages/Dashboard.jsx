@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState,useMemo} from "react";
 import { getProjects, getTasks, getAllUsers } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import StatCard from "../components/StatCard";
@@ -21,38 +21,52 @@ const Dashboard = () => {
   });
   const [loading, setLoading] = useState(true);
 
-  const fetchData = async () => {
+  const fetchData = async (active) => {
     try {
       setLoading(true);
-      // Only fetch users if the current user is an admin
       const promises = [getProjects(), getTasks()];
       if (isAdmin) {
         promises.push(getAllUsers());
       }
 
-      const results = await Promise.all(promises);
+      const results = await Promise.allSettled(promises);
       
+      if (!active.current) return;
+
+      const projects = results[0].status === "fulfilled" ? results[0].value.data.data : [];
+      const tasks = results[1].status === "fulfilled" ? results[1].value.data.data : [];
+      const members = isAdmin && results[2] && results[2].status === "fulfilled" 
+        ? results[2].value.data.data 
+        : [];
+
       setData({
-        projects: results[0].data.data || [],
-        tasks: results[1].data.data || [],
-        members: isAdmin && results[2] ? results[2].data.data : [],
+        projects: projects || [],
+        tasks: tasks || [],
+        members: members || [],
       });
     } catch (err) {
       console.error("Dashboard fetch error:", err);
-      toast.error("Failed to load dashboard data.");
     } finally {
-      setLoading(false);
+      if (active.current) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    const active = { current: true };
+    fetchData(active);
+    return () => { active.current = false; };
   }, [isAdmin]);
+
+  const teammatesCount = useMemo(() => {
+    if (isAdmin) return data.members.length;
+    const uniqueTeammates = new Set(data.tasks.map(t => t.assignedTo));
+    return uniqueTeammates.size || 0;
+  }, [isAdmin, data.members, data.tasks]);
 
   const stats = [
     { label: "Active Projects", value: data.projects.length, icon: LayoutDashboard, color: "blue", to: "/projects" },
-    { label: "Pending Tasks", value: data.tasks.filter(t => t.status !== "done").length, icon: CheckCircle2, color: "emerald", to: "/tasks" },
-    { label: "Total Members", value: isAdmin ? data.members.length : "N/A", icon: Users, color: "amber", to: isAdmin ? "/members" : null },
+    { label: "Pending Tasks", value: data.tasks.filter(t => t.status !== "done" && t.status !== "Completed").length, icon: CheckCircle2, color: "emerald", to: "/tasks" },
+    { label: isAdmin ? "Total Members" : "Team Size", value: teammatesCount, icon: Users, color: "amber", to: isAdmin ? "/members" : null },
   ];
 
   if (loading) {
