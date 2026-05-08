@@ -1,5 +1,5 @@
-import { useEffect, useState,useMemo} from "react";
-import { getProjects, getTasks, getAllUsers } from "../services/api";
+import { useEffect, useState } from "react";
+import { getDashboardStats } from "../services/api";
 import { useAuth } from "../context/AuthContext";
 import StatCard from "../components/StatCard";
 import ProjectCard from "../components/ProjectCard";
@@ -15,35 +15,24 @@ import toast from "react-hot-toast";
 const Dashboard = () => {
   const { userProfile, isAdmin } = useAuth();
   const [data, setData] = useState({
-    projects: [],
-    tasks: [],
-    members: [],
+    totalProjects: 0,
+    pendingTasks: 0,
+    teamSize: 0,
+    recentProjects: [],
+    recentTasks: [],
   });
   const [loading, setLoading] = useState(true);
 
   const fetchData = async (active) => {
     try {
       setLoading(true);
-      const promises = [getProjects(), getTasks()];
-      if (isAdmin) {
-        promises.push(getAllUsers());
-      }
-
-      const results = await Promise.allSettled(promises);
+      const res = await getDashboardStats();
       
       if (!active.current) return;
 
-      const projects = results[0].status === "fulfilled" ? results[0].value.data.data : [];
-      const tasks = results[1].status === "fulfilled" ? results[1].value.data.data : [];
-      const members = isAdmin && results[2] && results[2].status === "fulfilled" 
-        ? results[2].value.data.data 
-        : [];
-
-      setData({
-        projects: projects || [],
-        tasks: tasks || [],
-        members: members || [],
-      });
+      if (res.data.success) {
+        setData(res.data.data);
+      }
     } catch (err) {
       console.error("Dashboard fetch error:", err);
     } finally {
@@ -57,16 +46,10 @@ const Dashboard = () => {
     return () => { active.current = false; };
   }, [isAdmin]);
 
-  const teammatesCount = useMemo(() => {
-    if (isAdmin) return data.members.length;
-    const uniqueTeammates = new Set(data.tasks.map(t => t.assignedTo));
-    return uniqueTeammates.size || 0;
-  }, [isAdmin, data.members, data.tasks]);
-
   const stats = [
-    { label: "Active Projects", value: data.projects.length, icon: LayoutDashboard, color: "blue", to: "/projects" },
-    { label: "Pending Tasks", value: data.tasks.filter(t => t.status !== "done" && t.status !== "Completed").length, icon: CheckCircle2, color: "emerald", to: "/tasks" },
-    { label: isAdmin ? "Total Members" : "Team Size", value: teammatesCount, icon: Users, color: "amber", to: isAdmin ? "/members" : null },
+    { label: "Active Projects", value: data.totalProjects, icon: LayoutDashboard, color: "blue", to: "/projects" },
+    { label: "Pending Tasks", value: data.pendingTasks, icon: CheckCircle2, color: "emerald", to: "/tasks" },
+    { label: isAdmin ? "Total Members" : "Team Size", value: data.teamSize || 0, icon: Users, color: "amber", to: isAdmin ? "/members" : null },
   ];
 
   if (loading) {
@@ -93,7 +76,7 @@ const Dashboard = () => {
             Welcome back, {userProfile?.name?.split(" ")[0]}! 👋
           </h1>
           <p className="text-lg font-medium opacity-70" style={{ color: "var(--text-secondary)" }}>
-            You have <span className="text-emerald-600 font-bold">{data.tasks.filter(t => t.status === "todo").length} tasks</span> pending today.
+            You have <span className="text-emerald-600 font-bold">{data.pendingTasks} tasks</span> pending today.
           </p>
         </div>
         {/* Decorative elements */}
@@ -117,10 +100,10 @@ const Dashboard = () => {
             </Link>
           </div>
           <div className="grid grid-cols-1 gap-4">
-            {data.projects.slice(0, 3).map((project) => (
+            {data.recentProjects.map((project) => (
               <ProjectCard key={project._id || project.id} project={project} />
             ))}
-            {data.projects.length === 0 && (
+            {data.recentProjects.length === 0 && (
               <div className="glass-card p-10 text-center border-dashed border-2 border-black/5 bg-slate-50/50">
                 <p className="text-sm font-bold opacity-40">No projects yet</p>
                 <Link to="/projects" className="btn-primary mt-4 inline-flex items-center gap-2 text-xs">
@@ -140,10 +123,10 @@ const Dashboard = () => {
             </Link>
           </div>
           <div className="space-y-4">
-            {data.tasks.filter(t => t.status !== "done").slice(0, 4).map((task) => (
+            {data.recentTasks.map((task) => (
               <TaskCard key={task._id || task.id} task={task} />
             ))}
-            {data.tasks.length === 0 && (
+            {data.recentTasks.length === 0 && (
               <div className="glass-card p-10 text-center border-dashed border-2 border-black/5 bg-slate-50/50">
                 <p className="text-sm font-bold opacity-40">All caught up!</p>
               </div>

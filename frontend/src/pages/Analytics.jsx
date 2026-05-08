@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getProjects, getTasks, getAllUsers } from "../services/api";
+import { getDashboardStats } from "../services/api";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LabelList
@@ -10,12 +10,10 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import { useAuth } from "../context/AuthContext";
 
 const COLORS = ["#10b981", "#0ea5e9", "#f59e0b", "#ef4444", "#64748b"];
 
 const Analytics = () => {
-  const { isAdmin } = useAuth();
   const [data, setData] = useState({
     statusData: [],
     priorityData: [],
@@ -29,64 +27,22 @@ const Analytics = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        // Only fetch users if the current user is an admin
-        const promises = [
-          getProjects(),
-          getTasks(),
-        ];
-        if (isAdmin) {
-          promises.push(getAllUsers());
-        }
+        const res = await getDashboardStats();
         
-        const results = await Promise.allSettled(promises);
-
-        const projects = results[0].status === "fulfilled" ? results[0].value.data.data : [];
-        const tasks = results[1].status === "fulfilled" ? results[1].value.data.data : [];
-        const users = isAdmin && results[2] && results[2].status === "fulfilled" ? results[2].value.data.data : [];
-
-        if (results[0].status === "rejected" || results[1].status === "rejected") {
-          console.warn("Some analytics data failed to load:", results[0].reason || results[1].reason);
+        if (res.data.success) {
+          const d = res.data.data;
+          setData({
+            statusData: d.statusData || [],
+            priorityData: d.priorityData || [],
+            projectProgress: d.projectProgress || [],
+            memberWorkload: d.memberWorkload || [],
+            totals: {
+              projects: d.totalProjects || 0,
+              tasks: d.totalTasks || 0,
+              completed: d.completedTasks || 0
+            }
+          });
         }
-
-        // Task Status Aggregation
-        const statusCounts = {};
-        tasks.forEach(t => statusCounts[t.status] = (statusCounts[t.status] || 0) + 1);
-        const statusData = Object.keys(statusCounts).map(name => ({ name, value: statusCounts[name] }));
-
-        // Priority Distribution
-        const priorityCounts = { Low: 0, Medium: 0, High: 0, Critical: 0 };
-        tasks.forEach(t => {
-          if (priorityCounts[t.priority] !== undefined) priorityCounts[t.priority]++;
-        });
-        const priorityData = Object.keys(priorityCounts).map(name => ({ name, value: priorityCounts[name] }));
-
-        // Project Completion Progress
-        const projectProgress = projects.map(p => {
-          const pTasks = tasks.filter(t => t.projectId === p.projectId);
-          const done = pTasks.filter(t => t.status === "Completed").length;
-          const pct = pTasks.length > 0 ? Math.round((done / pTasks.length) * 100) : 0;
-          return { name: p.title.substring(0, 15), progress: pct };
-        });
-
-        // Team Workload Analysis
-        const memberCounts = {};
-        tasks.forEach(t => {
-          const userName = t.assigneeName || "Unassigned";
-          memberCounts[userName] = (memberCounts[userName] || 0) + 1;
-        });
-        const memberWorkload = Object.keys(memberCounts).map(name => ({ name, tasks: memberCounts[name] }));
-
-        setData({
-          statusData,
-          priorityData,
-          projectProgress,
-          memberWorkload,
-          totals: {
-            projects: projects.length,
-            tasks: tasks.length,
-            completed: tasks.filter(t => t.status === "Completed").length
-          }
-        });
       } catch (err) {
         console.error("Analytics fetch error:", err);
         toast.error("Failed to load analytics data.");
